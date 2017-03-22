@@ -52,14 +52,14 @@ class LabeledPluginLayer( qgis.core.QgsPluginLayer ):
         qgis.core.QgsPluginLayer.__init__(self, LabeledPluginLayer.LAYER_TYPE,None)
         self.prj = qgis.core.QgsProject.instance()
         self.iface = qgis.utils.iface
-        self.pixelDistWithNoHeaderLine = 40
-        self.pixelDistWithSimpleHeaderLine = 100
+        self.pixelDistWithNoHeaderLine = 1 #distance in centimeters on map canvas when header line is not shown
+        self.pixelDistWithSimpleHeaderLine = 3 #distance in centimeters on map canvas when header line is simple (else double headerline)
         
         
         self.labelFields = [
                         #qgis.core.QgsField( "LblField", QtCore.QVariant.String, "varchar", 255),
-                        qgis.core.QgsField( "LblX", QtCore.QVariant.Double, "numeric", 255) ,
-                        qgis.core.QgsField( "LblY", QtCore.QVariant.Double, "numeric", 255) ,
+                        qgis.core.QgsField( "LblX", QtCore.QVariant.Double, "numeric", 20,10) ,
+                        qgis.core.QgsField( "LblY", QtCore.QVariant.Double, "numeric", 20,10) ,
                         qgis.core.QgsField( "LblAlignH", QtCore.QVariant.String, "varchar", 12),
                         qgis.core.QgsField( "LblAlignV", QtCore.QVariant.String, "varchar", 12),
                         qgis.core.QgsField( "LblSize", QtCore.QVariant.Int, "integer", 2 ),
@@ -72,7 +72,8 @@ class LabeledPluginLayer( qgis.core.QgsPluginLayer ):
                         qgis.core.QgsField( "LblStrike", QtCore.QVariant.Int, "integer", 1),
                         qgis.core.QgsField( "LblShow", QtCore.QVariant.Int, "integer", 1),
                         qgis.core.QgsField( "LblShowCO", QtCore.QVariant.Int, "integer", 1),
-                        qgis.core.QgsField( "LblAShow", QtCore.QVariant.Int, "integer", 1)
+                        qgis.core.QgsField( "LblAShow", QtCore.QVariant.Int, "integer", 1),
+                        qgis.core.QgsField( "LblScale", QtCore.QVariant.Double, "numeric", 255) 
                         ]
         
         self.labelfielddefaultvalue = {'LblShow' : 1,
@@ -117,9 +118,10 @@ class LabeledPluginLayer( qgis.core.QgsPluginLayer ):
                 #connecting signals from parent layer - do connexion aftter parent layer check
                 self.connectParentLayer()
                 #otherwiwe it doesn't show
-
+                self.parentvectorlayer.commitChanges()
                 self.setValid(True)
                 self.triggerRepaint()
+                self.iface.setActiveLayer(self.parentvectorlayer)
 
                 return True
             else:
@@ -143,6 +145,12 @@ class LabeledPluginLayer( qgis.core.QgsPluginLayer ):
         self.parentvectorlayer.geometryChanged.connect(self.geometryChanged)
         self.parentvectorlayer.featuresDeleted.connect(self.featuresDeleted)
         self.parentvectorlayer.featureAdded.connect(self.featureAdded)
+        if False:   #not working
+            if int(qgis.PyQt.QtCore.QT_VERSION_STR[0]) == 4 :    #qgis2
+                self.parentvectorlayer.layerDeleted.connect(self.removeHeaderLineLayer)
+            if int(qgis.PyQt.QtCore.QT_VERSION_STR[0]) == 5 :    #qgis3
+                self.parentvectorlayer.willBeDeleted.connect(self.removeHeaderLineLayer)
+        
         
     def disconnectParentLayer(self):
         try:
@@ -150,6 +158,12 @@ class LabeledPluginLayer( qgis.core.QgsPluginLayer ):
             self.parentvectorlayer.geometryChanged.disconnect(self.geometryChanged)
             self.parentvectorlayer.featuresDeleted.disconnect(self.featuresDeleted)
             self.parentvectorlayer.featureAdded.disconnect(self.featureAdded)
+            if False:   #not working
+                if int(qgis.PyQt.QtCore.QT_VERSION_STR[0]) == 4 :    #qgis2
+                    self.parentvectorlayer.layerDeleted.disconnect(self.removeHeaderLineLayer)
+                if int(qgis.PyQt.QtCore.QT_VERSION_STR[0]) == 5 :    #qgis3
+                    self.parentvectorlayer.willBeDeleted.disconnect(self.removeHeaderLineLayer)
+            
         except:
             pass
             
@@ -253,6 +267,8 @@ class LabeledPluginLayer( qgis.core.QgsPluginLayer ):
                 self.parentvectorlayer = layer
                 self.loadLabeledPluginLayer(self.parentvectorlayer,True)
                 self.prj.readMapLayer.disconnect(self.layerAddedtoProject)
+                
+    
 
     #*******************************************************************************************************
     #**************************** Parent Layer initialization   *******************************************
@@ -309,6 +325,9 @@ class LabeledPluginLayer( qgis.core.QgsPluginLayer ):
             self.parentvectorlayer.setCustomProperty("labeling/priority", "10") # puts a high priority to labeling layer
             self.parentvectorlayer.setCustomProperty("labeling/multilineAlign","1") # multiline align to center
             #self.parentvectorlayer.setCustomProperty("labeling/wrapChar", "%") # multiline break symbol
+            
+            self.parentvectorlayer.setCustomProperty("labeling/drawLabels","true" ) # default value
+            self.parentvectorlayer.setCustomProperty("labeling/isExpression","false" ) # default value
 
             #line properties case
             self.parentvectorlayer.setCustomProperty("labeling/placement","4" ) 
@@ -333,6 +352,7 @@ class LabeledPluginLayer( qgis.core.QgsPluginLayer ):
                 self.parentvectorlayer.setCustomProperty("labeling/dataDefined/AlwaysShow", "1~~0~~~~LblAShow")
                 
             elif int(qgis.PyQt.QtCore.QT_VERSION_STR[0]) == 5 :    #qgis3
+                # #data defined properties
                 self.parentvectorlayer.setCustomProperty("labeling/ddProperties", 
                                                             '<properties><Option type="Map"><Option value="" name="name" type="QString"/><Option name="properties" type="Map">\
                                                             <Option name="AlwaysShow" type="Map"><Option value="true" name="active" type="bool"/><Option value="LblAShow" name="field" type="QString"/><Option value="2" name="type" type="int"/></Option>\
@@ -462,6 +482,19 @@ class LabeledPluginLayer( qgis.core.QgsPluginLayer ):
     #**************************** Header Line Layer methods           *******************************************
     #*******************************************************************************************************
         
+    def removeHeaderLineLayer(self):
+        print('remove')
+        self.disconnectParentLayer()
+        if not self.parentvectorlayer is None:
+            try:
+                if int(qgis.PyQt.QtCore.QT_VERSION_STR[0]) == 4 :    #qgis2
+                    qgis.core.QgsMapLayerRegistry.instance().removeMapLayer(self)
+                    #self.iface.setActiveLayer(activelayer)
+                elif int(qgis.PyQt.QtCore.QT_VERSION_STR[0]) == 5 :    #qgis3
+                    qgis.core.QgsProject.instance().removeMapLayer(self)
+                    #self.iface.setActiveLayer(activelayer)
+            except:
+                pass
         
     def resetHeaderLineLayer(self):
         #
@@ -636,7 +669,7 @@ class LabeledPluginLayer( qgis.core.QgsPluginLayer ):
     def adjustFeature(self,parentfet, labelfet, update = False):
         #
         #header line creation process - parent layer and headerlinelayer must be on editing mode
-        #
+        #update means only one feature is changed
 
         #compute new header line geom
         
@@ -673,7 +706,7 @@ class LabeledPluginLayer( qgis.core.QgsPluginLayer ):
                         pointfeature = intersect.interpolate(.25 * intersect.length()).asPoint()
 
             
-            newgeom = self.generateHeaderLine(pointlabel, pointfeature)
+            newgeom = self.generateHeaderLine(parentfet,pointlabel, pointfeature,update)
             
             if pointlabel.x()<pointfeature.x():
                 self.parentvectorlayer.changeAttributeValue(parentfet.id(),self.parentvectorlayer.fields().indexFromName('LblAlignH'), 'Right')
@@ -692,9 +725,39 @@ class LabeledPluginLayer( qgis.core.QgsPluginLayer ):
             
             
 
-    def generateHeaderLine(self,pointlabel, pointfeature):
-        distnoheaderinmeters = self.iface.mapCanvas().mapUnitsPerPixel() * self.pixelDistWithNoHeaderLine
-        distsimpleheaderinmeters = self.iface.mapCanvas().mapUnitsPerPixel() * self.pixelDistWithSimpleHeaderLine
+    def generateHeaderLine(self,parentfet,pointlabel, pointfeature,update):
+    
+        if not update:
+
+            if int(qgis.PyQt.QtCore.QT_VERSION_STR[0]) == 4 :    #qgis2
+                if isinstance(parentfet["LblScale"],QtCore.QPyNullVariant) or parentfet["LblScale"] is None :
+                    scale = self.iface.mapCanvas().scale()
+                    self.parentvectorlayer.changeAttributeValue(parentfet.id(),self.parentvectorlayer.fields().indexFromName("LblScale"), scale)
+                else:
+                    scale = parentfet["LblScale"]
+                    """
+                    self.parentvectorlayer.changeAttributeValue(parentfet.id(),self.parentvectorlayer.fields().indexFromName("LblScale"), scale)
+                    distnoheaderinmeters = scale * self.pixelDistWithNoHeaderLine/100.0
+                    distsimpleheaderinmeters = scale * self.pixelDistWithSimpleHeaderLine/100.0
+                    """
+                    
+            elif int(qgis.PyQt.QtCore.QT_VERSION_STR[0]) == 5 :    #qgis3
+                if isinstance(parentfet["LblScale"],QtCore.QVariant) or parentfet["LblScale"] is None :
+                    scale = self.iface.mapCanvas().scale()
+                    self.parentvectorlayer.changeAttributeValue(parentfet.id(),self.parentvectorlayer.fields().indexFromName("LblScale"), scale)
+                else:
+                    scale = parentfet["LblScale"]
+                    
+        else:
+            scale = self.iface.mapCanvas().scale()
+            self.parentvectorlayer.changeAttributeValue(parentfet.id(),self.parentvectorlayer.fields().indexFromName("LblScale"), scale)
+            
+                    
+                
+        distnoheaderinmeters = scale * self.pixelDistWithNoHeaderLine/100.0
+        distsimpleheaderinmeters = scale * self.pixelDistWithSimpleHeaderLine/100.0
+        #distnoheaderinmeters = self.iface.mapCanvas().mapUnitsPerPixel() * self.pixelDistWithNoHeaderLine
+        #distsimpleheaderinmeters = self.iface.mapCanvas().mapUnitsPerPixel() * self.pixelDistWithSimpleHeaderLine
         
         distfeat = qgis.core.QgsGeometry.fromPoint(pointlabel).distance( qgis.core.QgsGeometry.fromPoint(pointfeature))
         if distfeat < distnoheaderinmeters:

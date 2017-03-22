@@ -282,7 +282,7 @@ class EasyCustomLabeling(QtCore.QObject):
                 self.iface.setActiveLayer(activelayer)
             except:    #qgis 3
                 qgis.core.QgsProject.instance().addMapLayer(self.lbllayer[-1])
-        
+                self.iface.setActiveLayer(activelayer)
         
         
         
