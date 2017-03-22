@@ -7,7 +7,13 @@
 #
 # WARNING! All changes made in this file will be lost!
 
-from PyQt4 import QtCore, QtGui
+#from PyQt4 import QtCore, QtGui
+
+from  qgis.PyQt import QtCore, QtGui
+try:        #qt4
+    from qgis.PyQt.QtGui import QDialog, QDialogButtonBox, QSplitter, QLabel, QComboBox, QApplication
+except:     #qt5
+    from qgis.PyQt.QtWidgets import  QDialog, QDialogButtonBox, QSplitter, QLabel, QComboBox, QApplication
 
 try:
     _fromUtf8 = QtCore.QString.fromUtf8
@@ -24,20 +30,20 @@ class Ui_EasyCustomLabeling(object):
         EasyCustomLabeling.setLocale(QtCore.QLocale(QtCore.QLocale.English, QtCore.QLocale.UnitedStates))
         EasyCustomLabeling.setSizeGripEnabled(True)
         EasyCustomLabeling.setModal(True)
-        self.buttonBox = QtGui.QDialogButtonBox(EasyCustomLabeling)
+        self.buttonBox = QDialogButtonBox(EasyCustomLabeling)
         self.buttonBox.setGeometry(QtCore.QRect(100, 100, 191, 23))
-        self.buttonBox.setStandardButtons(QtGui.QDialogButtonBox.Cancel|QtGui.QDialogButtonBox.Ok)
+        self.buttonBox.setStandardButtons(QDialogButtonBox.Cancel|QDialogButtonBox.Ok)
         self.buttonBox.setObjectName(_fromUtf8("buttonBox"))
-        self.splitter = QtGui.QSplitter(EasyCustomLabeling)
+        self.splitter = QSplitter(EasyCustomLabeling)
         self.splitter.setGeometry(QtCore.QRect(20, 20, 261, 20))
         self.splitter.setOrientation(QtCore.Qt.Horizontal)
         self.splitter.setObjectName(_fromUtf8("splitter"))
-        self.label = QtGui.QLabel(self.splitter)
+        self.label = QLabel(self.splitter)
         self.label.setLocale(QtCore.QLocale(QtCore.QLocale.English, QtCore.QLocale.UnitedStates))
         self.label.setObjectName(_fromUtf8("label"))
-        self.labelfield = QtGui.QComboBox(self.splitter)
+        self.labelfield = QComboBox(self.splitter)
         self.labelfield.setObjectName(_fromUtf8("labelfield"))
-        self.label_2 = QtGui.QLabel(EasyCustomLabeling)
+        self.label_2 = QLabel(EasyCustomLabeling)
         self.label_2.setGeometry(QtCore.QRect(10, 60, 301, 21))
         font = QtGui.QFont()
         font.setFamily(_fromUtf8("Arial"))
@@ -49,13 +55,24 @@ class Ui_EasyCustomLabeling(object):
         self.label_2.setObjectName(_fromUtf8("label_2"))
 
         self.retranslateUi(EasyCustomLabeling)
+        """
         QtCore.QObject.connect(self.buttonBox, QtCore.SIGNAL(_fromUtf8("accepted()")), EasyCustomLabeling.accept)
         QtCore.QObject.connect(self.buttonBox, QtCore.SIGNAL(_fromUtf8("rejected()")), EasyCustomLabeling.reject)
+        """
+        self.buttonBox.accepted.connect(EasyCustomLabeling.accept)
+        self.buttonBox.rejected.connect(EasyCustomLabeling.reject)
+        
         QtCore.QMetaObject.connectSlotsByName(EasyCustomLabeling)
 
     def retranslateUi(self, EasyCustomLabeling):
-        EasyCustomLabeling.setWindowTitle(QtGui.QApplication.translate("EasyCustomLabeling", "EasyCustomLabeling", None, QtGui.QApplication.UnicodeUTF8))
-        EasyCustomLabeling.setToolTip(QtGui.QApplication.translate("EasyCustomLabeling", "Choose labeling field", None, QtGui.QApplication.UnicodeUTF8))
-        self.label.setText(QtGui.QApplication.translate("EasyCustomLabeling", "Label field", None, QtGui.QApplication.UnicodeUTF8))
-        self.label_2.setText(QtGui.QApplication.translate("EasyCustomLabeling", "Note: Chosen labeling field is copied in LblField. ", None, QtGui.QApplication.UnicodeUTF8))
+        try:    #qgis2
+            EasyCustomLabeling.setWindowTitle(QApplication.translate("EasyCustomLabeling", "EasyCustomLabeling", None, QApplication.UnicodeUTF8))
+            EasyCustomLabeling.setToolTip(QApplication.translate("EasyCustomLabeling", "Choose labeling field", None, QApplication.UnicodeUTF8))
+            self.label.setText(QApplication.translate("EasyCustomLabeling", "Label field", None, QApplication.UnicodeUTF8))
+            self.label_2.setText(QApplication.translate("EasyCustomLabeling", "Note: Chosen labeling field is copied in LblField. ", None, QApplication.UnicodeUTF8))
+        except:
+            EasyCustomLabeling.setWindowTitle(QApplication.translate("EasyCustomLabeling", "EasyCustomLabeling", None))
+            EasyCustomLabeling.setToolTip(QApplication.translate("EasyCustomLabeling", "Choose labeling field", None))
+            self.label.setText(QApplication.translate("EasyCustomLabeling", "Label field", None))
+            self.label_2.setText(QApplication.translate("EasyCustomLabeling", "Note: Chosen labeling field is copied in LblField. ", None))
 

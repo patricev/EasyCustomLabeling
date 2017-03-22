@@ -28,23 +28,33 @@ The plug-in creates new attributes in the existing shapefile.
  *                                                                         *
  ***************************************************************************/
 """
-
+"""
 from PyQt4.QtCore import *
 from PyQt4.QtGui import *
+"""
+from  qgis.PyQt import QtCore, QtGui
+try:        #qt4
+    from qgis.PyQt.QtGui import QDialog
+except:     #qt5
+    from qgis.PyQt.QtWidgets import  QDialog
+
 from qgis.core import *
-from ui_EasyCustomLabeling import Ui_EasyCustomLabeling
+from .ui_EasyCustomLabeling import Ui_EasyCustomLabeling
 
 class EasyCustomLabelingDialog(QDialog, Ui_EasyCustomLabeling):
-	
-	def __init__(self, ldp):
-		QDialog.__init__(self)
-		# Set up the user interface from Designer.
-		self.setupUi(self)
-		
-		self.loadFields(ldp)
-		
-	def loadFields(self, ldp):
-		fields = ldp.fieldNameMap()
-		for fieldname, index in fields.iteritems():
-			self.labelfield.addItem(fieldname)
-		
+    
+    def __init__(self, ldp):
+        QDialog.__init__(self)
+        # Set up the user interface from Designer.
+        self.setupUi(self)
+        
+        self.loadFields(ldp)
+        
+    def loadFields(self, ldp):
+        fields = ldp.fieldNameMap()
+        """
+        for fieldname, index in fields.iteritems():
+            self.labelfield.addItem(fieldname)
+        """
+        for fieldname, index in fields.items():
+            self.labelfield.addItem(fieldname)
