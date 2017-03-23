@@ -56,6 +56,7 @@ class LabeledPluginLayer( qgis.core.QgsPluginLayer ):
         self.pixelDistWithSimpleHeaderLine = 3 #distance in centimeters on map canvas when header line is simple (else double headerline)
         
         
+        
         self.labelFields = [
                         #qgis.core.QgsField( "LblField", QtCore.QVariant.String, "varchar", 255),
                         qgis.core.QgsField( "LblX", QtCore.QVariant.Double, "numeric", 20,10) ,
@@ -90,6 +91,12 @@ class LabeledPluginLayer( qgis.core.QgsPluginLayer ):
         #self.selectedObjects = []
         self.selectedObjectsIds = []
         self.fieldnametolabel = None
+        if False:
+            self.changeCrs()
+            self.iface.mapCanvas().destinationCrsChanged.connect(self.changeCrs)
+        
+        
+        
         
             
     def loadLabeledPluginLayer(self,vectorlayer = None, parentlayeralreadychecked = False):
@@ -122,6 +129,7 @@ class LabeledPluginLayer( qgis.core.QgsPluginLayer ):
                 self.setValid(True)
                 self.triggerRepaint()
                 self.iface.setActiveLayer(self.parentvectorlayer)
+                self.headerlinelayer.styleChanged.connect(self.saveheaderstyle)
 
                 return True
             else:
@@ -133,7 +141,17 @@ class LabeledPluginLayer( qgis.core.QgsPluginLayer ):
             except:
                 self.iface.messageBar().pushMessage("Error", QApplication.translate("EasyCustomLabeling", "There is no layer currently selected, \n please click on the vector layer you need to label", None), level=0, duration=3)
             return False
-
+        
+        
+    def  changeCrs(self):
+        try:
+            #self.setCrs(qgis.utils.iface.mapCanvas().mapSettings().destinationCrs())
+            self.xform  = qgis.core.QgsCoordinateTransform(self.crs(), qgis.utils.iface.mapCanvas().mapSettings().destinationCrs())
+            self.meshrenderer.changeTriangulationCRS()
+            self.forcerefresh = True
+            self.triggerRepaint()
+        except Exception as e:
+            pass
             
             
     #*******************************************************************************************************
@@ -229,17 +247,20 @@ class LabeledPluginLayer( qgis.core.QgsPluginLayer ):
         return True ifsuccessful
         """
         
+        DEBUG = False
+        
         element = node.toElement()
-        self.parent_layer_path = self.prj.readPath( element.attribute('parent_layer') )
+        #self.parent_layer_path = self.prj.readPath( element.attribute('parent_layer') )
+        self.parent_layer_path = os.path.normpath( element.attribute('parent_layer') )
         self.fieldnametolabel = element.attribute('labelfield')
         
         if os.path.isfile(self.parent_layer_path) :
             basename = os.path.basename(self.parent_layer_path).split('.')
             if len(basename)>0:
                 basename = basename[0]
-            try:    #qgis2
-                layers = self.prj.mapLayers()
-            except: #qgis3
+            try:    #qgis3
+                layers = self.prj.mapLayers().values()
+            except: #qgis2
                 layers = qgis.core.QgsMapLayerRegistry.instance().mapLayers().values()
             layerfound = False
             #check if parent layer is already loaded
@@ -253,18 +274,26 @@ class LabeledPluginLayer( qgis.core.QgsPluginLayer ):
                 self.parentvectorlayer = qgis.core.QgsVectorLayer(self.parent_layer_path,basename,"ogr")
                 self.loadLabeledPluginLayer(self.parentvectorlayer,True)
                 self.prj.readMapLayer.connect(self.layerAddedtoProject)
+                if DEBUG : print('readXml - not found' , self.name())
                 return True
             else:   #if parent layer is found
                 self.loadLabeledPluginLayer(self.parentvectorlayer,True)
+                if DEBUG : print('readXml found' , self.name())
                 return True
                 
         else:
             return False
             
     def layerAddedtoProject(self, layer,node ):  
+        DEBUG = False
+        
         if isinstance(layer, qgis.core.QgsVectorLayer):
+            if DEBUG : print('layerAddedtoProject - called' , self.name(),os.path.normpath(layer.source()) == os.path.normpath(self.parent_layer_path) )
+            if DEBUG : print('layerAddedtoProject - called' , os.path.normpath(layer.source()) ,  os.path.normpath(self.parent_layer_path) )
+            
             if not self.parent_layer_path is None  and os.path.normpath(layer.source()) == os.path.normpath(self.parent_layer_path):
                 self.parentvectorlayer = layer
+                if DEBUG : print('layerAddedtoProject - found' , self.name())
                 self.loadLabeledPluginLayer(self.parentvectorlayer,True)
                 self.prj.readMapLayer.disconnect(self.layerAddedtoProject)
                 
@@ -284,6 +313,7 @@ class LabeledPluginLayer( qgis.core.QgsPluginLayer ):
         if self.checkParentLayer(parentlayeralreadychecked):        #also disconnect parent layer
             
             
+            #check fields even parent layer is already checked
             parentlayerfields = self.parentvectorlayer.fields()
             parenlayerfieldname = [field.name() for field in  parentlayerfields]
             #create fields
@@ -295,81 +325,84 @@ class LabeledPluginLayer( qgis.core.QgsPluginLayer ):
                     self.parentvectorlayer.updateFields()
                     self.parentvectorlayer.commitChanges()
             
-            #assin default values
-            self.parentvectorlayer.startEditing()
-            for feature in self.parentvectorlayer.getFeatures():
-                for key, value in self.labelfielddefaultvalue.items():
-                    if int(qgis.PyQt.QtCore.QT_VERSION_STR[0]) == 4 :    #qgis2
-                        if isinstance(feature[key],QtCore.QPyNullVariant) or feature[key] is None :
-                            self.parentvectorlayer.changeAttributeValue(feature.id(),self.parentvectorlayer.fields().indexFromName(key), value)
-                    elif int(qgis.PyQt.QtCore.QT_VERSION_STR[0]) == 5 :    #qgis3
-                        if isinstance(feature[key],QtCore.QVariant) or feature[key] is None :
-                            self.parentvectorlayer.changeAttributeValue(feature.id(),self.parentvectorlayer.fields().indexFromName(key), value)
-                if len(self.selectedObjectsIds)>0:
-                    if feature.id() in self.selectedObjectsIds:
-                        self.parentvectorlayer.changeAttributeValue(feature.id(),self.parentvectorlayer.fields().indexFromName("LblShow"), 1)
-                    else:
-                        self.parentvectorlayer.changeAttributeValue(feature.id(),self.parentvectorlayer.fields().indexFromName("LblShow"), 0)
-            self.parentvectorlayer.commitChanges()
-            
-            
-            
-            
-            # #generic labeling properties
-            self.parentvectorlayer.setCustomProperty("labeling/fieldName", self.fieldnametolabel )  # TODO replace default value with dialog input
-            self.parentvectorlayer.setCustomProperty("labeling","pal" ) # new gen labeling activated
-            self.parentvectorlayer.setCustomProperty("labeling/fontSize","8" ) # default value
-            self.parentvectorlayer.setCustomProperty("labeling/multiLineLabels","true" ) # default value
-            self.parentvectorlayer.setCustomProperty("labeling/enabled","true" ) # default value
-            #self.parentvectorlayer.setCustomProperty("labeling/displayAll", "true") # force all labels to display
-            self.parentvectorlayer.setCustomProperty("labeling/priority", "10") # puts a high priority to labeling layer
-            self.parentvectorlayer.setCustomProperty("labeling/multilineAlign","1") # multiline align to center
-            #self.parentvectorlayer.setCustomProperty("labeling/wrapChar", "%") # multiline break symbol
-            
-            self.parentvectorlayer.setCustomProperty("labeling/drawLabels","true" ) # default value
-            self.parentvectorlayer.setCustomProperty("labeling/isExpression","false" ) # default value
-
-            #line properties case
-            self.parentvectorlayer.setCustomProperty("labeling/placement","4" ) 
-            
-            
-            #assign data defined properties
-            if int(qgis.PyQt.QtCore.QT_VERSION_STR[0]) == 4 :    #qgis2
-                # #data defined properties
-                self.parentvectorlayer.setCustomProperty("labeling/dataDefined/PositionX", "1~~0~~~~LblX")  
-                self.parentvectorlayer.setCustomProperty("labeling/dataDefined/PositionY", "1~~0~~~~LblY")  
-                self.parentvectorlayer.setCustomProperty("labeling/dataDefined/Hali", "1~~0~~~~LblAlignH")  
-                self.parentvectorlayer.setCustomProperty("labeling/dataDefined/Vali","1~~0~~~~LblAlignV")  
-                self.parentvectorlayer.setCustomProperty("labeling/dataDefined/Size" ,"1~~0~~~~LblSize") 
-                self.parentvectorlayer.setCustomProperty("labeling/dataDefined/Rotation" ,"1~~0~~~~LblRot" ) 
-                self.parentvectorlayer.setCustomProperty("labeling/dataDefined/Bold" , "1~~0~~~~LblBold")  
-                self.parentvectorlayer.setCustomProperty("labeling/dataDefined/Italic" ,"1~~0~~~~LblItalic") 
-                self.parentvectorlayer.setCustomProperty("labeling/dataDefined/Underline" ,"1~~0~~~~LblUnder")
-                self.parentvectorlayer.setCustomProperty("labeling/dataDefined/Strikeout" ,"1~~0~~~~LblStrike")
-                self.parentvectorlayer.setCustomProperty("labeling/dataDefined/Color" ,"1~~0~~~~LblColor")
-                self.parentvectorlayer.setCustomProperty("labeling/dataDefined/Family" ,"1~~0~~~~LblFont") 
-                self.parentvectorlayer.setCustomProperty("labeling/dataDefined/Show", "1~~0~~~~LblShow")
-                self.parentvectorlayer.setCustomProperty("labeling/dataDefined/AlwaysShow", "1~~0~~~~LblAShow")
+            #assign default values only the first time
+            if not parentlayeralreadychecked :
                 
-            elif int(qgis.PyQt.QtCore.QT_VERSION_STR[0]) == 5 :    #qgis3
-                # #data defined properties
-                self.parentvectorlayer.setCustomProperty("labeling/ddProperties", 
-                                                            '<properties><Option type="Map"><Option value="" name="name" type="QString"/><Option name="properties" type="Map">\
-                                                            <Option name="AlwaysShow" type="Map"><Option value="true" name="active" type="bool"/><Option value="LblAShow" name="field" type="QString"/><Option value="2" name="type" type="int"/></Option>\
-                                                            <Option name="Bold" type="Map"><Option value="true" name="active" type="bool"/><Option value="LblBold" name="field" type="QString"/><Option value="2" name="type" type="int"/></Option>\
-                                                            <Option name="Color" type="Map"><Option value="true" name="active" type="bool"/><Option value="LblColor" name="field" type="QString"/><Option value="2" name="type" type="int"/></Option>\
-                                                            <Option name="Family" type="Map"><Option value="true" name="active" type="bool"/><Option value="LblFont" name="field" type="QString"/><Option value="2" name="type" type="int"/></Option>\
-                                                            <Option name="Hali" type="Map"><Option value="true" name="active" type="bool"/><Option value="LblAlignH" name="field" type="QString"/><Option value="2" name="type" type="int"/></Option>\
-                                                            <Option name="Italic" type="Map"><Option value="true" name="active" type="bool"/><Option value="LblItalic" name="field" type="QString"/><Option value="2" name="type" type="int"/></Option>\
-                                                            <Option name="PositionX" type="Map"><Option value="true" name="active" type="bool"/><Option value="LblX" name="field" type="QString"/><Option value="2" name="type" type="int"/></Option>\
-                                                            <Option name="PositionY" type="Map"><Option value="true" name="active" type="bool"/><Option value="LblY" name="field" type="QString"/><Option value="2" name="type" type="int"/></Option>\
-                                                            <Option name="Rotation" type="Map"><Option value="true" name="active" type="bool"/><Option value="LblRot" name="field" type="QString"/><Option value="2" name="type" type="int"/></Option>\
-                                                            <Option name="Show" type="Map"><Option value="true" name="active" type="bool"/><Option value="LblShow" name="field" type="QString"/><Option value="2" name="type" type="int"/></Option>\
-                                                            <Option name="Size" type="Map"><Option value="true" name="active" type="bool"/><Option value="LblSize" name="field" type="QString"/><Option value="2" name="type" type="int"/></Option>\
-                                                            <Option name="Strikeout" type="Map"><Option value="true" name="active" type="bool"/><Option value="LblStrike" name="field" type="QString"/><Option value="2" name="type" type="int"/></Option>\
-                                                            <Option name="Underline" type="Map"><Option value="true" name="active" type="bool"/><Option value="LblUnder" name="field" type="QString"/><Option value="2" name="type" type="int"/></Option>\
-                                                            <Option name="Vali" type="Map"><Option value="true" name="active" type="bool"/><Option value="LblAlignV" name="field" type="QString"/><Option value="2" name="type" type="int"/></Option>\
-                                                            </Option><Option value="collection" name="type" type="QString"/></Option></properties>')
+                #assin default values
+                self.parentvectorlayer.startEditing()
+                for feature in self.parentvectorlayer.getFeatures():
+                    for key, value in self.labelfielddefaultvalue.items():
+                        if int(qgis.PyQt.QtCore.QT_VERSION_STR[0]) == 4 :    #qgis2
+                            if isinstance(feature[key],QtCore.QPyNullVariant) or feature[key] is None :
+                                self.parentvectorlayer.changeAttributeValue(feature.id(),self.parentvectorlayer.fields().indexFromName(key), value)
+                        elif int(qgis.PyQt.QtCore.QT_VERSION_STR[0]) == 5 :    #qgis3
+                            if isinstance(feature[key],QtCore.QVariant) or feature[key] is None :
+                                self.parentvectorlayer.changeAttributeValue(feature.id(),self.parentvectorlayer.fields().indexFromName(key), value)
+                    if len(self.selectedObjectsIds)>0:
+                        if feature.id() in self.selectedObjectsIds:
+                            self.parentvectorlayer.changeAttributeValue(feature.id(),self.parentvectorlayer.fields().indexFromName("LblShow"), 1)
+                        else:
+                            self.parentvectorlayer.changeAttributeValue(feature.id(),self.parentvectorlayer.fields().indexFromName("LblShow"), 0)
+                self.parentvectorlayer.commitChanges()
+                
+                
+                
+                
+                # #generic labeling properties
+                self.parentvectorlayer.setCustomProperty("labeling/fieldName", self.fieldnametolabel )  # TODO replace default value with dialog input
+                self.parentvectorlayer.setCustomProperty("labeling","pal" ) # new gen labeling activated
+                self.parentvectorlayer.setCustomProperty("labeling/fontSize","8" ) # default value
+                self.parentvectorlayer.setCustomProperty("labeling/multiLineLabels","true" ) # default value
+                self.parentvectorlayer.setCustomProperty("labeling/enabled","true" ) # default value
+                #self.parentvectorlayer.setCustomProperty("labeling/displayAll", "true") # force all labels to display
+                self.parentvectorlayer.setCustomProperty("labeling/priority", "10") # puts a high priority to labeling layer
+                self.parentvectorlayer.setCustomProperty("labeling/multilineAlign","1") # multiline align to center
+                #self.parentvectorlayer.setCustomProperty("labeling/wrapChar", "%") # multiline break symbol
+                
+                self.parentvectorlayer.setCustomProperty("labeling/drawLabels","true" ) # default value
+                self.parentvectorlayer.setCustomProperty("labeling/isExpression","false" ) # default value
+
+                #line properties case
+                self.parentvectorlayer.setCustomProperty("labeling/placement","4" ) 
+                
+                
+                #assign data defined properties
+                if int(qgis.PyQt.QtCore.QT_VERSION_STR[0]) == 4 :    #qgis2
+                    # #data defined properties
+                    self.parentvectorlayer.setCustomProperty("labeling/dataDefined/PositionX", "1~~0~~~~LblX")  
+                    self.parentvectorlayer.setCustomProperty("labeling/dataDefined/PositionY", "1~~0~~~~LblY")  
+                    self.parentvectorlayer.setCustomProperty("labeling/dataDefined/Hali", "1~~0~~~~LblAlignH")  
+                    self.parentvectorlayer.setCustomProperty("labeling/dataDefined/Vali","1~~0~~~~LblAlignV")  
+                    self.parentvectorlayer.setCustomProperty("labeling/dataDefined/Size" ,"1~~0~~~~LblSize") 
+                    self.parentvectorlayer.setCustomProperty("labeling/dataDefined/Rotation" ,"1~~0~~~~LblRot" ) 
+                    self.parentvectorlayer.setCustomProperty("labeling/dataDefined/Bold" , "1~~0~~~~LblBold")  
+                    self.parentvectorlayer.setCustomProperty("labeling/dataDefined/Italic" ,"1~~0~~~~LblItalic") 
+                    self.parentvectorlayer.setCustomProperty("labeling/dataDefined/Underline" ,"1~~0~~~~LblUnder")
+                    self.parentvectorlayer.setCustomProperty("labeling/dataDefined/Strikeout" ,"1~~0~~~~LblStrike")
+                    self.parentvectorlayer.setCustomProperty("labeling/dataDefined/Color" ,"1~~0~~~~LblColor")
+                    self.parentvectorlayer.setCustomProperty("labeling/dataDefined/Family" ,"1~~0~~~~LblFont") 
+                    self.parentvectorlayer.setCustomProperty("labeling/dataDefined/Show", "1~~0~~~~LblShow")
+                    self.parentvectorlayer.setCustomProperty("labeling/dataDefined/AlwaysShow", "1~~0~~~~LblAShow")
+                    
+                elif int(qgis.PyQt.QtCore.QT_VERSION_STR[0]) == 5 :    #qgis3
+                    # #data defined properties
+                    self.parentvectorlayer.setCustomProperty("labeling/ddProperties", 
+                                                                '<properties><Option type="Map"><Option value="" name="name" type="QString"/><Option name="properties" type="Map">\
+                                                                <Option name="AlwaysShow" type="Map"><Option value="true" name="active" type="bool"/><Option value="LblAShow" name="field" type="QString"/><Option value="2" name="type" type="int"/></Option>\
+                                                                <Option name="Bold" type="Map"><Option value="true" name="active" type="bool"/><Option value="LblBold" name="field" type="QString"/><Option value="2" name="type" type="int"/></Option>\
+                                                                <Option name="Color" type="Map"><Option value="true" name="active" type="bool"/><Option value="LblColor" name="field" type="QString"/><Option value="2" name="type" type="int"/></Option>\
+                                                                <Option name="Family" type="Map"><Option value="true" name="active" type="bool"/><Option value="LblFont" name="field" type="QString"/><Option value="2" name="type" type="int"/></Option>\
+                                                                <Option name="Hali" type="Map"><Option value="true" name="active" type="bool"/><Option value="LblAlignH" name="field" type="QString"/><Option value="2" name="type" type="int"/></Option>\
+                                                                <Option name="Italic" type="Map"><Option value="true" name="active" type="bool"/><Option value="LblItalic" name="field" type="QString"/><Option value="2" name="type" type="int"/></Option>\
+                                                                <Option name="PositionX" type="Map"><Option value="true" name="active" type="bool"/><Option value="LblX" name="field" type="QString"/><Option value="2" name="type" type="int"/></Option>\
+                                                                <Option name="PositionY" type="Map"><Option value="true" name="active" type="bool"/><Option value="LblY" name="field" type="QString"/><Option value="2" name="type" type="int"/></Option>\
+                                                                <Option name="Rotation" type="Map"><Option value="true" name="active" type="bool"/><Option value="LblRot" name="field" type="QString"/><Option value="2" name="type" type="int"/></Option>\
+                                                                <Option name="Show" type="Map"><Option value="true" name="active" type="bool"/><Option value="LblShow" name="field" type="QString"/><Option value="2" name="type" type="int"/></Option>\
+                                                                <Option name="Size" type="Map"><Option value="true" name="active" type="bool"/><Option value="LblSize" name="field" type="QString"/><Option value="2" name="type" type="int"/></Option>\
+                                                                <Option name="Strikeout" type="Map"><Option value="true" name="active" type="bool"/><Option value="LblStrike" name="field" type="QString"/><Option value="2" name="type" type="int"/></Option>\
+                                                                <Option name="Underline" type="Map"><Option value="true" name="active" type="bool"/><Option value="LblUnder" name="field" type="QString"/><Option value="2" name="type" type="int"/></Option>\
+                                                                <Option name="Vali" type="Map"><Option value="true" name="active" type="bool"/><Option value="LblAlignV" name="field" type="QString"/><Option value="2" name="type" type="int"/></Option>\
+                                                                </Option><Option value="collection" name="type" type="QString"/></Option></properties>')
                 
             
             self.connectParentLayer()
@@ -481,7 +514,27 @@ class LabeledPluginLayer( qgis.core.QgsPluginLayer ):
     #*******************************************************************************************************
     #**************************** Header Line Layer methods           *******************************************
     #*******************************************************************************************************
+    
+    
+    def saveheaderstyle(self):
+        stylefilename = self.getHeaderStyleFileName()
+        if not stylefilename is None:
+            self.headerlinelayer.saveNamedStyle(stylefilename)
+        self.triggerRepaint()
         
+    def getHeaderStyleFileName(self):
+        if not self.parentvectorlayer is None:
+            dir_to_save = os.path.dirname(self.parentvectorlayer.source())
+            basename = os.path.basename(self.parentvectorlayer.source()).split('.')
+            if len(basename)>0:
+                basename = basename[0]
+            basename = basename + '_ECL.qml'
+            return os.path.join(dir_to_save,basename)
+        else:
+            return None
+        
+        
+    
     def removeHeaderLineLayer(self):
         print('remove')
         self.disconnectParentLayer()
@@ -501,7 +554,7 @@ class LabeledPluginLayer( qgis.core.QgsPluginLayer ):
         # header line layer creation
         #
         if not self.parentvectorlayer is None:
-            type = "LineString?crs="+str(self.parentvectorlayer.crs().authid()) 
+            type = "MultiLineString?crs="+str(self.parentvectorlayer.crs().authid()) 
             name='temp'
             self.headerlinelayer = qgis.core.QgsVectorLayer(type, name, "memory")
             self.pr = self.headerlinelayer.dataProvider()
@@ -509,8 +562,13 @@ class LabeledPluginLayer( qgis.core.QgsPluginLayer ):
             # add fields
             self.pr.addAttributes([qgis.core.QgsField("Value", QtCore.QVariant.Double) ])
             self.headerlinelayer.updateFields()
-            pathpointvelocityqml = os.path.join(os.path.dirname(__file__), '..','default_label_style.qml')
+            if not self.getHeaderStyleFileName() is None and os.path.isfile(self.getHeaderStyleFileName()):
+                pathpointvelocityqml = self.getHeaderStyleFileName()
+            else:
+                pathpointvelocityqml = os.path.join(os.path.dirname(__file__), '..','default_label_style.qml')
             self.headerlinelayer.loadNamedStyle(pathpointvelocityqml)
+            self.headerlinelayer.setCrs(self.parentvectorlayer.crs())
+            self.setCrs(self.parentvectorlayer.crs())
         else:
             self.headerlinelayer = None
         
@@ -670,14 +728,23 @@ class LabeledPluginLayer( qgis.core.QgsPluginLayer ):
         #
         #header line creation process - parent layer and headerlinelayer must be on editing mode
         #update means only one feature is changed
-
+        DEBUG = False
         #compute new header line geom
         
         if parentfet["LblShow"] and isinstance(parentfet['LblX'], float) and isinstance(parentfet['LblY'], float) :
+            #getpointlabel
             pointlabel = qgis.core.QgsPoint(parentfet['LblX'],parentfet['LblY'])
+            
             #ending point of header line
             if parentfet.geometry().type() == 0 : #point 0 : point 1 : line 2 : polygon
                 pointfeature = parentfet.geometry().asPoint()
+                if DEBUG : print('pointfeature0',pointfeature)
+                
+                if pointfeature == qgis.core.QgsPoint(0,0): #multigeometry case
+                    pointfeature = parentfet.geometry().asMultiPoint()
+                    if DEBUG : print('pointfeature1',pointfeature)
+                    pointfeature = [qgis.core.QgsPoint(pointfet) for pointfet in pointfeature]
+                    if DEBUG : print('pointfeature2',pointfeature)
                 
             elif parentfet.geometry().type() == 1 : #point 0 : point 1 : line 2 : polygon
                 parentgeom = qgis.core.QgsGeometry(parentfet.geometry())
@@ -694,21 +761,46 @@ class LabeledPluginLayer( qgis.core.QgsPluginLayer ):
                         pointfeature = intersect.asPoint()
                 
             elif parentfet.geometry().type() == 2 : #point 0 : point 1 : line 2 : polygon
-                pointfeature = parentfet.geometry().centroid().asPoint()
-                templine = qgis.core.QgsGeometry.fromPolyline([pointlabel,pointfeature])
-                if templine.intersects(parentfet.geometry()):
-                    intersect = templine.intersection(parentfet.geometry())
-                    if len(intersect.asMultiPolyline())==0: #singleline
-                        pointfeature = intersect.interpolate(.25 * intersect.length()).asPoint()
-                    else:   #mulilines
-                        #pass
-                        intersect.convertToSingleType()
-                        pointfeature = intersect.interpolate(.25 * intersect.length()).asPoint()
+                polygon = parentfet.geometry().asPolygon()
+                if int(qgis.PyQt.QtCore.QT_VERSION_STR[0]) == 4 :    #qgis2
+                    if len(polygon)==0:     #mutlipart geom 
+                        polygon = parentfet.geometry().asMultiPolygon()
+                        polygon = [qgis.core.QgsGeometry.fromPolygon(polyg) for polyg in polygon]
+                        pointfeature = [polyg.centroid().asPoint() for polyg in polygon]
+                    else:
+                        pointfeature = [parentfet.geometry().centroid().asPoint()]
+                        #don t do line if label interesects polygon
+                        if qgis.core.QgsGeometry(qgis.core.QgsGeometry.fromPoint(pointlabel)).intersects(parentfet.geometry()):
+                            pointlabel = pointfeature[0]
+                        
+                elif int(qgis.PyQt.QtCore.QT_VERSION_STR[0]) == 5 :    #qgis3
+                    #qgis2 method makes dump....
+                    pointfeature = [parentfet.geometry().centroid().asPoint()]
+                
+                for pointfet in pointfeature:
+                    templine = qgis.core.QgsGeometry.fromPolyline([pointlabel,pointfet])
+                    if templine.intersects(parentfet.geometry()):
+                        intersect = templine.intersection(parentfet.geometry())
+                        if len(intersect.asMultiPolyline())==0: #singleline
+                            #pointfet = intersect.interpolate(.25 * intersect.length()).asPoint()
+                            pointfeature[pointfeature.index(pointfet)] = intersect.interpolate(.25 * intersect.length()).asPoint()
+                        else:   #mulilines
+                            intersect.convertToSingleType()
+                            #pointfet = intersect.interpolate(.25 * intersect.length()).asPoint()
+                            pointfeature[pointfeature.index(pointfet)] = intersect.interpolate(.25 * intersect.length()).asPoint()
 
-            
+            #compute heaer line geometry
             newgeom = self.generateHeaderLine(parentfet,pointlabel, pointfeature,update)
             
-            if pointlabel.x()<pointfeature.x():
+            
+            #compute horizontal alignment
+            if isinstance(pointfeature,list):
+                xs = [pointfet.x() for pointfet in pointfeature]
+                pointfeaturex = min(np.array(xs))
+            else:
+                pointfeaturex = pointfeature.x()
+            
+            if pointlabel.x()<pointfeaturex :
                 self.parentvectorlayer.changeAttributeValue(parentfet.id(),self.parentvectorlayer.fields().indexFromName('LblAlignH'), 'Right')
             else:
                 self.parentvectorlayer.changeAttributeValue(parentfet.id(),self.parentvectorlayer.fields().indexFromName('LblAlignH'), 'Left')
@@ -725,8 +817,14 @@ class LabeledPluginLayer( qgis.core.QgsPluginLayer ):
             
             
 
-    def generateHeaderLine(self,parentfet,pointlabel, pointfeature,update):
-    
+    def generateHeaderLine(self,parentfet,pointlabel, pointfeaturelist,update):
+        #
+        # pointfeature as list if multipart
+        #pointfeature
+        
+        if not isinstance(pointfeaturelist,list):
+            pointfeaturelist = [pointfeaturelist]
+        #First checkscale
         if not update:
 
             if int(qgis.PyQt.QtCore.QT_VERSION_STR[0]) == 4 :    #qgis2
@@ -752,26 +850,33 @@ class LabeledPluginLayer( qgis.core.QgsPluginLayer ):
             scale = self.iface.mapCanvas().scale()
             self.parentvectorlayer.changeAttributeValue(parentfet.id(),self.parentvectorlayer.fields().indexFromName("LblScale"), scale)
             
-                    
+        #then compute headerline
                 
         distnoheaderinmeters = scale * self.pixelDistWithNoHeaderLine/100.0
         distsimpleheaderinmeters = scale * self.pixelDistWithSimpleHeaderLine/100.0
         #distnoheaderinmeters = self.iface.mapCanvas().mapUnitsPerPixel() * self.pixelDistWithNoHeaderLine
         #distsimpleheaderinmeters = self.iface.mapCanvas().mapUnitsPerPixel() * self.pixelDistWithSimpleHeaderLine
         
-        distfeat = qgis.core.QgsGeometry.fromPoint(pointlabel).distance( qgis.core.QgsGeometry.fromPoint(pointfeature))
-        if distfeat < distnoheaderinmeters:
-            return qgis.core.QgsGeometry()
-        elif  distfeat < distsimpleheaderinmeters :
-            return qgis.core.QgsGeometry.fromPolyline([pointlabel,pointfeature])
-        else:
-            headermiddlepoint = qgis.core.QgsGeometry(qgis.core.QgsGeometry.fromPoint(pointlabel))
-            if pointlabel.x()<pointfeature.x():
-                headermiddlepoint.translate(distnoheaderinmeters,0)
+        multipoly = []
+        for pointfeature in pointfeaturelist:
+            distfeat = qgis.core.QgsGeometry.fromPoint(pointlabel).distance( qgis.core.QgsGeometry.fromPoint(pointfeature))
+            if distfeat < distnoheaderinmeters:
+                pass
+            elif  distfeat < distsimpleheaderinmeters :
+                multipoly.append([pointlabel,pointfeature])
+                #return qgis.core.QgsGeometry.fromPolyline([pointlabel,pointfeature])
             else:
-                headermiddlepoint.translate(-distnoheaderinmeters,0)
-            headermiddlepoint = headermiddlepoint.asPoint()
-            return qgis.core.QgsGeometry.fromPolyline([pointlabel,headermiddlepoint,pointfeature])
-            
-
+                headermiddlepoint = qgis.core.QgsGeometry(qgis.core.QgsGeometry.fromPoint(pointlabel))
+                if pointlabel.x()<pointfeature.x():
+                    headermiddlepoint.translate(distnoheaderinmeters,0)
+                else:
+                    headermiddlepoint.translate(-distnoheaderinmeters,0)
+                headermiddlepoint = headermiddlepoint.asPoint()
+                #return qgis.core.QgsGeometry.fromPolyline([pointlabel,headermiddlepoint,pointfeature])
+                multipoly.append([pointlabel,headermiddlepoint,pointfeature])
+        
+        if len(multipoly) == 0:
+            return qgis.core.QgsGeometry()
+        else:
+            return qgis.core.QgsGeometry.fromMultiPolyline(multipoly)
         
