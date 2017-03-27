@@ -774,8 +774,18 @@ class LabeledPluginLayer( qgis.core.QgsPluginLayer ):
                             pointlabel = pointfeature[0]
                         
                 elif int(qgis.PyQt.QtCore.QT_VERSION_STR[0]) == 5 :    #qgis3
-                    #qgis2 method makes dump....
-                    pointfeature = [parentfet.geometry().centroid().asPoint()]
+                    polygon = parentfet.geometry().asPolygon()
+                    if len(polygon)==0:     #mutlipart geom 
+                        #qgis2 method makes dump....
+                        tempgeom = qgis.core.QgsGeometry(parentfet.geometry())
+                        tempgeom.convertToSingleType()
+                        pointfeature = [tempgeom.centroid().asPoint()]
+                    else:
+                        pointfeature = [parentfet.geometry().centroid().asPoint()]
+                        #don t do line if label interesects polygon
+                        if qgis.core.QgsGeometry(qgis.core.QgsGeometry.fromPoint(pointlabel)).intersects(parentfet.geometry()):
+                            pointlabel = pointfeature[0]
+                    
                 
                 for pointfet in pointfeature:
                     templine = qgis.core.QgsGeometry.fromPolyline([pointlabel,pointfet])
