@@ -83,14 +83,17 @@ class LabeledPluginLayer( qgis.core.QgsPluginLayer ):
                                         'LblAlignV' : 'Half',
                                         'LblAlignH' : 'Center'}
                                         
-        self.parent_layer_path = None
+        self.parent_layer_source = None
         self.parentvectorlayer = None
-                                        
+        self.incremementId = None   #some parent vector layer have id starting at 0, other at 1 ... Used for comparing parentlayerid and headerlinelayer id
+        
         self.headerlinelayer = None
+        self.resetHeaderLineLayer()
         
         #self.selectedObjects = []
         self.selectedObjectsIds = []
         self.fieldnametolabel = None
+        
         if False:
             self.changeCrs()
             self.iface.mapCanvas().destinationCrsChanged.connect(self.changeCrs)
@@ -105,6 +108,7 @@ class LabeledPluginLayer( qgis.core.QgsPluginLayer ):
             self.disconnectParentLayer()
         
             self.parentvectorlayer = vectorlayer
+            self.incremementId = 1 - int(self.parentvectorlayer.getFeatures().next().id() )
             
             try:    #qgis2
                 self.setLayerName(vectorlayer.name()+'_HeaderLineLabel')
@@ -214,13 +218,14 @@ class LabeledPluginLayer( qgis.core.QgsPluginLayer ):
         if not self.parentvectorlayer is None:
             return self.parentvectorlayer.dataProvider()
         else:
-            return None
+            #return None
+            return self.headerlinelayer.dataProvider()
         
     def extent(self):
         if not self.parentvectorlayer is None:
             return self.parentvectorlayer.extent()
         else:
-            return None
+            return self.headerlinelayer.extent()
         
     def name(self):
         if not self.parentvectorlayer is None:
@@ -237,7 +242,7 @@ class LabeledPluginLayer( qgis.core.QgsPluginLayer ):
         element = node.toElement()
         element.setAttribute("type", "plugin")                          #must be written to work
         element.setAttribute("name", LabeledPluginLayer.LAYER_TYPE)     #must be written to work
-        element.setAttribute("parent_layer", os.path.normpath( self.parentvectorlayer.source() ))
+        element.setAttribute("parent_layer",  self.parentvectorlayer.source() )
         element.setAttribute("labelfield", self.parentvectorlayer.customProperty("labeling/fieldName") )
         return True
         
@@ -250,48 +255,44 @@ class LabeledPluginLayer( qgis.core.QgsPluginLayer ):
         DEBUG = False
         
         element = node.toElement()
-        #self.parent_layer_path = self.prj.readPath( element.attribute('parent_layer') )
-        self.parent_layer_path = os.path.normpath( element.attribute('parent_layer') )
+        self.parent_layer_source =  element.attribute('parent_layer') 
         self.fieldnametolabel = element.attribute('labelfield')
         
-        if os.path.isfile(self.parent_layer_path) :
-            basename = os.path.basename(self.parent_layer_path).split('.')
-            if len(basename)>0:
-                basename = basename[0]
-            try:    #qgis3
-                layers = self.prj.mapLayers().values()
-            except: #qgis2
-                layers = qgis.core.QgsMapLayerRegistry.instance().mapLayers().values()
-            layerfound = False
-            #check if parent layer is already loaded
-            for layer in layers:
-                if os.path.normpath(layer.source()) == os.path.normpath(self.parent_layer_path):
-                    self.parentvectorlayer = layer
-                    layerfound = True
-                    break
-
-            if not layerfound:  #if not found, wait a temp layer and activate readMapLayer signal when the parent layer will be loaded
-                self.parentvectorlayer = qgis.core.QgsVectorLayer(self.parent_layer_path,basename,"ogr")
-                self.loadLabeledPluginLayer(self.parentvectorlayer,True)
-                self.prj.readMapLayer.connect(self.layerAddedtoProject)
-                if DEBUG : print('readXml - not found' , self.name())
-                return True
-            else:   #if parent layer is found
-                self.loadLabeledPluginLayer(self.parentvectorlayer,True)
-                if DEBUG : print('readXml found' , self.name())
-                return True
-                
-        else:
-            return False
+        if DEBUG : print('parent_layer_path',self.parent_layer_source )
+        try:    #qgis3
+            layers = self.prj.mapLayers().values()
+        except: #qgis2
+            layers = qgis.core.QgsMapLayerRegistry.instance().mapLayers().values()
+        layerfound = False
+        #check if parent layer is already loaded
+        for layer in layers:
+            if DEBUG : print('source',layer.source(), self.parent_layer_source)
+            if layer.source() == self.parent_layer_source:
+                self.parentvectorlayer = layer
+                layerfound = True
+                break
+            
+        if not layerfound:  #if not found, wait a temp layer and activate readMapLayer signal when the parent layer will be loaded
+            self.prj.readMapLayer.connect(self.layerAddedtoProject)
+            self.setValid(True)
+            if DEBUG : print('readXml - not found' , self.name())
+            return True
+        else:   #if parent layer is found
+            self.loadLabeledPluginLayer(self.parentvectorlayer,True)
+            if DEBUG : print('readXml found' , self.name())
+            return True
+        
+        
+        
             
     def layerAddedtoProject(self, layer,node ):  
         DEBUG = False
-        
+
         if isinstance(layer, qgis.core.QgsVectorLayer):
-            if DEBUG : print('layerAddedtoProject - called' , self.name(),os.path.normpath(layer.source()) == os.path.normpath(self.parent_layer_path) )
-            if DEBUG : print('layerAddedtoProject - called' , os.path.normpath(layer.source()) ,  os.path.normpath(self.parent_layer_path) )
+            if DEBUG : print('layerAddedtoProject - called' , self.name(),os.path.normpath(layer.source()) == os.path.normpath(self.parent_layer_source) )
+            if DEBUG : print('layerAddedtoProject - called' , os.path.normpath(layer.source()) ,  os.path.normpath(self.parent_layer_source) )
             
-            if not self.parent_layer_path is None  and os.path.normpath(layer.source()) == os.path.normpath(self.parent_layer_path):
+            if not self.parent_layer_source is None  and layer.source() == self.parent_layer_source:
                 self.parentvectorlayer = layer
                 if DEBUG : print('layerAddedtoProject - found' , self.name())
                 self.loadLabeledPluginLayer(self.parentvectorlayer,True)
@@ -344,7 +345,6 @@ class LabeledPluginLayer( qgis.core.QgsPluginLayer ):
                         else:
                             self.parentvectorlayer.changeAttributeValue(feature.id(),self.parentvectorlayer.fields().indexFromName("LblShow"), 0)
                 self.parentvectorlayer.commitChanges()
-                
                 
                 
                 
@@ -569,8 +569,11 @@ class LabeledPluginLayer( qgis.core.QgsPluginLayer ):
             self.headerlinelayer.loadNamedStyle(pathpointvelocityqml)
             self.headerlinelayer.setCrs(self.parentvectorlayer.crs())
             self.setCrs(self.parentvectorlayer.crs())
-        else:
-            self.headerlinelayer = None
+        else:   #create temporary layer - needed when loading a project
+            #self.headerlinelayer = None
+            type = "MultiLineString?crs="+str(qgis.utils.iface.mapCanvas().mapSettings().destinationCrs().authid()) 
+            name='temp'
+            self.headerlinelayer = qgis.core.QgsVectorLayer(type, name, "memory")
         
         
         
@@ -598,7 +601,8 @@ class LabeledPluginLayer( qgis.core.QgsPluginLayer ):
                 if DEBUG : print('ids',[fett.id() for fett in self.headerlinelayer.getFeatures()], [fett.id() for fett in self.parentvectorlayer.getFeatures()])
                 if isinstance(fet['LblX'], float) and isinstance(fet['LblY'], float) :
                     fettemp = qgis.core.QgsFeature()
-                    if self.headerlinelayer.getFeatures(qgis.core.QgsFeatureRequest().setFilterFid(FeatureId + 1)).nextFeature(fettemp): #memory layer id start at 1 ...
+                    #self.headerlinelayer.getFeatures(qgis.core.QgsFeatureRequest().setFilterFid(FeatureId + 1)).nextFeature(fettemp):
+                    if self.headerlinelayer.getFeatures(qgis.core.QgsFeatureRequest().setFilterFid(FeatureId + self.incremementId)).nextFeature(fettemp): 
                         if DEBUG : print('case2 ok')
                         self.adjustFeature(fet, fettemp,update = True)
             self.headerlinelayer.commitChanges()
@@ -610,7 +614,8 @@ class LabeledPluginLayer( qgis.core.QgsPluginLayer ):
             fet = qgis.core.QgsFeature()
             if self.parentvectorlayer.getFeatures(qgis.core.QgsFeatureRequest().setFilterFid(FeatureId)).nextFeature(fet):
                 fettemp = qgis.core.QgsFeature()
-                if self.headerlinelayer.getFeatures(qgis.core.QgsFeatureRequest().setFilterFid(FeatureId + 1)).nextFeature(fettemp): #memory layer id start at 1 ...
+                #if self.headerlinelayer.getFeatures(qgis.core.QgsFeatureRequest().setFilterFid(FeatureId + 1)).nextFeature(fettemp): #memory layer id start at 1 ...
+                if self.headerlinelayer.getFeatures(qgis.core.QgsFeatureRequest().setFilterFid(FeatureId + self.incremementId)).nextFeature(fettemp): 
                     self.adjustFeature(fet, fettemp,update = True)
             self.headerlinelayer.commitChanges()
             self.triggerRepaint()
@@ -663,7 +668,8 @@ class LabeledPluginLayer( qgis.core.QgsPluginLayer ):
             if DEBUG : print('ids',[fett.id() for fett in self.headerlinelayer.getFeatures()], [fett.id() for fett in self.parentvectorlayer.getFeatures()])
             if isinstance(fet['LblX'], float) and isinstance(fet['LblY'], float) :
                 fettemp = qgis.core.QgsFeature()
-                if self.headerlinelayer.getFeatures(qgis.core.QgsFeatureRequest().setFilterFid(FeatureId + 1)).nextFeature(fettemp): #memory layer id start at 1 ...
+                #if self.headerlinelayer.getFeatures(qgis.core.QgsFeatureRequest().setFilterFid(FeatureId + 1)).nextFeature(fettemp): #memory layer id start at 1 ...
+                if self.headerlinelayer.getFeatures(qgis.core.QgsFeatureRequest().setFilterFid(FeatureId + self.incremementId)).nextFeature(fettemp):
                     if DEBUG : print('case2 ok')
                     self.adjustFeature(fet, fettemp,update = True)
         self.headerlinelayer.commitChanges()
@@ -884,9 +890,10 @@ class LabeledPluginLayer( qgis.core.QgsPluginLayer ):
                 headermiddlepoint = headermiddlepoint.asPoint()
                 #return qgis.core.QgsGeometry.fromPolyline([pointlabel,headermiddlepoint,pointfeature])
                 multipoly.append([pointlabel,headermiddlepoint,pointfeature])
-        
         if len(multipoly) == 0:
             return qgis.core.QgsGeometry()
+        elif len(multipoly) == 1 :
+            return qgis.core.QgsGeometry.fromPolyline(multipoly[0])
         else:
             return qgis.core.QgsGeometry.fromMultiPolyline(multipoly)
         
