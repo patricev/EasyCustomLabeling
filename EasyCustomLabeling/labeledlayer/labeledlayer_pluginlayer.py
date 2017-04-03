@@ -26,9 +26,10 @@ import qgis.utils
 #Qt
 from  qgis.PyQt import QtCore, QtGui
 try:        #qt4
-    from qgis.PyQt.QtGui import QApplication, QMessageBox
+    from qgis.PyQt.QtGui import QApplication, QMessageBox, QDialog, QVBoxLayout, QDialogButtonBox
 except:     #qt5
-    from qgis.PyQt.QtWidgets import  QApplication, QMessageBox
+    from qgis.PyQt.QtWidgets import  QApplication, QMessageBox, QDialog, QVBoxLayout, QDialogButtonBox
+    
 
 # other import
 import collections
@@ -83,7 +84,7 @@ class LabeledPluginLayer( qgis.core.QgsPluginLayer ):
                                         'LblAlignV' : 'Half',
                                         'LblAlignH' : 'Center'}
                                         
-        self.parent_layer_source = None
+        self.parent_layer_id = None
         self.parentvectorlayer = None
         self.incremementId = None   #some parent vector layer have id starting at 0, other at 1 ... Used for comparing parentlayerid and headerlinelayer id
         
@@ -93,6 +94,8 @@ class LabeledPluginLayer( qgis.core.QgsPluginLayer ):
         #self.selectedObjects = []
         self.selectedObjectsIds = []
         self.fieldnametolabel = None
+        
+        #self.styledlg =  QDialog()
         
         if False:
             self.changeCrs()
@@ -104,11 +107,17 @@ class LabeledPluginLayer( qgis.core.QgsPluginLayer ):
             
     def loadLabeledPluginLayer(self,vectorlayer = None, parentlayeralreadychecked = False):
         #check and add proper fields to parent layer
+        DEBUG = False
         if not vectorlayer is None:
             self.disconnectParentLayer()
         
             self.parentvectorlayer = vectorlayer
-            self.incremementId = 1 - int(self.parentvectorlayer.getFeatures().next().id() )
+            
+            fet = qgis.core.QgsFeature()
+            if self.parentvectorlayer.getFeatures().nextFeature(fet):
+                self.incremementId = 1 - int(fet.id() )
+            else:
+                self.incremementId = 0
             
             try:    #qgis2
                 self.setLayerName(vectorlayer.name()+'_HeaderLineLabel')
@@ -119,17 +128,20 @@ class LabeledPluginLayer( qgis.core.QgsPluginLayer ):
             success = self.initParentLayer(parentlayeralreadychecked)
             
             if success:
-            
+                if DEBUG : print('loadLabeledPluginLayer - success - parent layer : ',self.parentvectorlayer.source(),'count : ',self.parentvectorlayer.featureCount())
                 #create Header Line layer
                 self.resetHeaderLineLayer()
                 self.headerlinelayer.startEditing()
                 self.reinitHeaderLineLayer()
                 self.headerlinelayer.commitChanges()
+                if DEBUG : print('loadLabeledPluginLayer - success - hh layer',self.headerlinelayer.featureCount() )
+                
 
                 #connecting signals from parent layer - do connexion aftter parent layer check
                 self.connectParentLayer()
                 #otherwiwe it doesn't show
                 self.parentvectorlayer.commitChanges()
+                if DEBUG : print('loadLabeledPluginLayer - success - parent layer : ',self.parentvectorlayer.source(),'count : ',self.parentvectorlayer.featureCount())
                 self.setValid(True)
                 self.triggerRepaint()
                 self.iface.setActiveLayer(self.parentvectorlayer)
@@ -239,10 +251,13 @@ class LabeledPluginLayer( qgis.core.QgsPluginLayer ):
         return True ifsuccessful
         """
         #prj = qgis.core.QgsProject.instance()
+        self.saveheaderstyle()
+        
         element = node.toElement()
         element.setAttribute("type", "plugin")                          #must be written to work
         element.setAttribute("name", LabeledPluginLayer.LAYER_TYPE)     #must be written to work
-        element.setAttribute("parent_layer",  self.parentvectorlayer.source() )
+        #element.setAttribute("parent_layer",  self.parentvectorlayer.source() )
+        element.setAttribute("parent_layer",  self.parentvectorlayer.id() )
         element.setAttribute("labelfield", self.parentvectorlayer.customProperty("labeling/fieldName") )
         return True
         
@@ -255,10 +270,11 @@ class LabeledPluginLayer( qgis.core.QgsPluginLayer ):
         DEBUG = False
         
         element = node.toElement()
-        self.parent_layer_source =  element.attribute('parent_layer') 
+        #self.parent_layer_source =  element.attribute('parent_layer') 
+        self.parent_layer_id =  element.attribute('parent_layer') 
         self.fieldnametolabel = element.attribute('labelfield')
         
-        if DEBUG : print('parent_layer_path',self.parent_layer_source )
+        if DEBUG : print('parent_layer_id',self.parent_layer_id )
         try:    #qgis3
             layers = self.prj.mapLayers().values()
         except: #qgis2
@@ -266,8 +282,9 @@ class LabeledPluginLayer( qgis.core.QgsPluginLayer ):
         layerfound = False
         #check if parent layer is already loaded
         for layer in layers:
-            if DEBUG : print('source',layer.source(), self.parent_layer_source)
-            if layer.source() == self.parent_layer_source:
+            #if DEBUG : print('source',layer.source(), self.parent_layer_source)
+            if DEBUG : print('source',layer.id(), self.parent_layer_id)
+            if layer.id() == self.parent_layer_id:
                 self.parentvectorlayer = layer
                 layerfound = True
                 break
@@ -289,12 +306,12 @@ class LabeledPluginLayer( qgis.core.QgsPluginLayer ):
         DEBUG = False
 
         if isinstance(layer, qgis.core.QgsVectorLayer):
-            if DEBUG : print('layerAddedtoProject - called' , self.name(),os.path.normpath(layer.source()) == os.path.normpath(self.parent_layer_source) )
-            if DEBUG : print('layerAddedtoProject - called' , os.path.normpath(layer.source()) ,  os.path.normpath(self.parent_layer_source) )
+            if DEBUG : print('layerAddedtoProject - called' , 'name : ',self.name() ,' - id match : ',layer.id() == self.parent_layer_id) 
+            #if DEBUG : print('layerAddedtoProject - called' , layer.source() ,  self.parent_layer_source) 
             
-            if not self.parent_layer_source is None  and layer.source() == self.parent_layer_source:
+            if not self.parent_layer_id is None  and layer.id() == self.parent_layer_id:
                 self.parentvectorlayer = layer
-                if DEBUG : print('layerAddedtoProject - found' , self.name())
+                if DEBUG : print('layerAddedtoProject - found' , 'name : ',self.name())
                 self.loadLabeledPluginLayer(self.parentvectorlayer,True)
                 self.prj.readMapLayer.disconnect(self.layerAddedtoProject)
                 
@@ -517,10 +534,13 @@ class LabeledPluginLayer( qgis.core.QgsPluginLayer ):
     
     
     def saveheaderstyle(self):
+        print('stylechanged')
         stylefilename = self.getHeaderStyleFileName()
         if not stylefilename is None:
             self.headerlinelayer.saveNamedStyle(stylefilename)
         self.triggerRepaint()
+        
+        
         
     def getHeaderStyleFileName(self):
         if not self.parentvectorlayer is None:
@@ -560,8 +580,8 @@ class LabeledPluginLayer( qgis.core.QgsPluginLayer ):
             self.pr = self.headerlinelayer.dataProvider()
             self.headerlinelayer.startEditing()
             # add fields
-            self.pr.addAttributes([qgis.core.QgsField("Value", QtCore.QVariant.Double) ])
-            self.headerlinelayer.updateFields()
+            #self.pr.addAttributes([qgis.core.QgsField("Value", QtCore.QVariant.Double) ])
+            #self.headerlinelayer.updateFields()
             if not self.getHeaderStyleFileName() is None and os.path.isfile(self.getHeaderStyleFileName()):
                 pathpointvelocityqml = self.getHeaderStyleFileName()
             else:
@@ -569,13 +589,20 @@ class LabeledPluginLayer( qgis.core.QgsPluginLayer ):
             self.headerlinelayer.loadNamedStyle(pathpointvelocityqml)
             self.headerlinelayer.setCrs(self.parentvectorlayer.crs())
             self.setCrs(self.parentvectorlayer.crs())
+            
+            
         else:   #create temporary layer - needed when loading a project
             #self.headerlinelayer = None
-            type = "MultiLineString?crs="+str(qgis.utils.iface.mapCanvas().mapSettings().destinationCrs().authid()) 
+            if int(qgis.PyQt.QtCore.QT_VERSION_STR[0]) == 4 :    #qgis2
+                crstemp = qgis.utils.iface.mapCanvas().mapSettings().destinationCrs()
+            elif int(qgis.PyQt.QtCore.QT_VERSION_STR[0]) == 5 :    #qgis3
+                crstemp = qgis.core.QgsProject.instance().crs()
+            
+            type = "MultiLineString?crs="+str(crstemp.authid()) 
             name='temp'
             self.headerlinelayer = qgis.core.QgsVectorLayer(type, name, "memory")
-        
-        
+            self.setCrs(crstemp)
+
         
             
     def attributeValueChanged(self,FeatureId , idx  , variant):
@@ -701,15 +728,20 @@ class LabeledPluginLayer( qgis.core.QgsPluginLayer ):
                         self.adjustFeature(fet, fettemp)
                     self.pr.addFeatures([fettemp])
             if DEBUG : print('ids after ',[fett.id() for fett in self.headerlinelayer.getFeatures()], [fett.id() for fett in self.parentvectorlayer.getFeatures()])
-            #self.triggerRepaint()
-            #self.parentvectorlayer.commitChanges()
             """
-            if parentlayereditmode : 
-                self.parentvectorlayer.commitChanges()
-                self.parentvectorlayer.startEditing()
-            else:
-                self.parentvectorlayer.commitChanges()
+            #self.styledlg = QDialog()
+            self.tt = qgis.gui.QgsSingleSymbolRendererV2Widget(self.headerlinelayer,  qgis.core.QgsStyleV2.defaultStyle() ,self.headerlinelayer.rendererV2())
+            self.tt.setDockMode(False)
+            self.tt.setMapCanvas(self.iface.mapCanvas())
+            self.layout = QVBoxLayout()
+            self.layout.addWidget(self.tt)
+            self.buttons  = QDialogButtonBox(QDialogButtonBox.Ok | QDialogButtonBox.Cancel)
+            self.buttons.accepted.connect(self.styledlg.accept)
+            self.buttons.rejected.connect(self.styledlg.reject)
+            self.layout.addWidget(self.buttons)
+            self.styledlg.setLayout(self.layout)
             """
+            
         
     def checkDefaultFieldValue(self,feature):
         #
