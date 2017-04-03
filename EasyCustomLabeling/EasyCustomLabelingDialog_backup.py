@@ -37,27 +37,23 @@ try:        #qt4
     from qgis.PyQt.QtGui import QDialog
 except:     #qt5
     from qgis.PyQt.QtWidgets import  QDialog
-import os
+
 from qgis.core import *
 from .ui_EasyCustomLabeling import Ui_EasyCustomLabeling
 
 FORM_CLASS, _ = uic.loadUiType(os.path.join(
     os.path.dirname(__file__), 'ui_EasyCustomLabeling.ui'))
 
-class EasyCustomLabelingDialog(QDialog, FORM_CLASS):
+class EasyCustomLabelingDialog(QDialog, Ui_EasyCustomLabeling):
     
-    def __init__(self, ldp, parent = None):
-        super(EasyCustomLabelingDialog, self).__init__(parent)
+    def __init__(self, ldp):
+        QDialog.__init__(self)
         # Set up the user interface from Designer.
-        # After setupUI you can access any designer object by doing
-        # self.<objectname>, and you can use autoconnect slots - see
-        # http://qt-project.org/doc/qt-4.8/designer-using-a-ui-file.html
-        # #widgets-and-dialogs-with-auto-connect
         self.setupUi(self)
         
         self.loadFields(ldp)
         
-    def loadFields(self,ldp):
+    def loadFields(self, ldp):
         fields = ldp.fieldNameMap()
         """
         for fieldname, index in fields.iteritems():

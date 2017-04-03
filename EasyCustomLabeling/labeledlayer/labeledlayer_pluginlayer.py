@@ -87,7 +87,7 @@ class LabeledPluginLayer( qgis.core.QgsPluginLayer ):
         self.parent_layer_id = None
         self.parentvectorlayer = None
         self.incremementId = None   #some parent vector layer have id starting at 0, other at 1 ... Used for comparing parentlayerid and headerlinelayer id
-        
+        self.addheaderlinelayer = 1 #True
         self.headerlinelayer = None
         self.resetHeaderLineLayer()
         
@@ -127,7 +127,7 @@ class LabeledPluginLayer( qgis.core.QgsPluginLayer ):
             
             success = self.initParentLayer(parentlayeralreadychecked)
             
-            if success:
+            if success and self.addheaderlinelayer :
                 if DEBUG : print('loadLabeledPluginLayer - success - parent layer : ',self.parentvectorlayer.source(),'count : ',self.parentvectorlayer.featureCount())
                 #create Header Line layer
                 self.resetHeaderLineLayer()
@@ -421,8 +421,8 @@ class LabeledPluginLayer( qgis.core.QgsPluginLayer ):
                                                                 <Option name="Vali" type="Map"><Option value="true" name="active" type="bool"/><Option value="LblAlignV" name="field" type="QString"/><Option value="2" name="type" type="int"/></Option>\
                                                                 </Option><Option value="collection" name="type" type="QString"/></Option></properties>')
                 
-            
-            self.connectParentLayer()
+            if self.addheaderlinelayer :
+                self.connectParentLayer()
             
             return True
         else:
@@ -509,6 +509,7 @@ class LabeledPluginLayer( qgis.core.QgsPluginLayer ):
                 return False
                 
             self.fieldnametolabel = self.dlg.labelfield.currentText()
+            self.addheaderlinelayer = self.dlg.checkBox_hllayer.checkState()
             # show the dialog
             # if self.dlg.exec_():
             #     return True# print 'dialog execution'
@@ -534,7 +535,6 @@ class LabeledPluginLayer( qgis.core.QgsPluginLayer ):
     
     
     def saveheaderstyle(self):
-        print('stylechanged')
         stylefilename = self.getHeaderStyleFileName()
         if not stylefilename is None:
             self.headerlinelayer.saveNamedStyle(stylefilename)
@@ -785,18 +785,12 @@ class LabeledPluginLayer( qgis.core.QgsPluginLayer ):
                     if DEBUG : print('pointfeature2',pointfeature)
                 
             elif parentfet.geometry().type() == 1 : #point 0 : point 1 : line 2 : polygon
-                parentgeom = qgis.core.QgsGeometry(parentfet.geometry())
-                parentgeom.convertToSingleType()
-                pointfeature = parentgeom.interpolate(.5 * parentgeom.length()).asPoint()   #point in he middle of polyline
-                templine = qgis.core.QgsGeometry.fromPolyline([pointlabel,pointfeature])
-                if templine.intersects(parentfet.geometry()):
-                    intersect = templine.intersection(parentfet.geometry())
-                    if len(intersect.asMultiPoint())==0: #single point
-                        pointfeature = intersect.asPoint()
-                    else:   #mulilines
-                        #pass
-                        intersect.convertToSingleType()
-                        pointfeature = intersect.asPoint()
+                polyline = parentfet.geometry().asPolyline()
+                if len(polyline) == 0:
+                    polyline = parentfet.geometry().asMultiPolyline()
+                    pointfeature = [qgis.core.QgsGeometry.fromPolyline(polyl).nearestPoint(qgis.core.QgsGeometry.fromPoint(pointlabel)).asPoint()  for polyl in polyline]
+                else:
+                    pointfeature = [ qgis.core.QgsGeometry.fromPolyline(polyline).nearestPoint(qgis.core.QgsGeometry.fromPoint(pointlabel)).asPoint()  ]
                 
             elif parentfet.geometry().type() == 2 : #point 0 : point 1 : line 2 : polygon
                 polygon = parentfet.geometry().asPolygon()
