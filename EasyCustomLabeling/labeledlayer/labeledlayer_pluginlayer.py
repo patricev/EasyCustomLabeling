@@ -54,8 +54,8 @@ class LabeledPluginLayer( qgis.core.QgsPluginLayer ):
         self.prj = qgis.core.QgsProject.instance()
         self.iface = qgis.utils.iface
         self.pixelDistWithNoHeaderLine = 1 #distance in centimeters on map canvas when header line is not shown
-        self.pixelDistWithSimpleHeaderLine = 3 #distance in centimeters on map canvas when header line is simple (else double headerline)
-        
+        self.pixelDistWithSimpleHeaderLine = 2 #distance in centimeters on map canvas when header line is simple (else double headerline)
+        self.pixelDistBufferTargetPoint = 0.05 #distance in centimeters on map canvas when header line is simple (else double headerline)
         
         
         self.labelFields = [
@@ -113,21 +113,21 @@ class LabeledPluginLayer( qgis.core.QgsPluginLayer ):
         
             self.parentvectorlayer = vectorlayer
             
-            fet = qgis.core.QgsFeature()
-            if self.parentvectorlayer.getFeatures().nextFeature(fet):
-                self.incremementId = 1 - int(fet.id() )
-            else:
-                self.incremementId = 0
-            
             try:    #qgis2
                 self.setLayerName(vectorlayer.name()+'_HeaderLineLabel')
             except: #qgis3
                 self.setName(vectorlayer.name()+'_HeaderLineLabel')
             
-            
             success = self.initParentLayer(parentlayeralreadychecked)
             
             if success and self.addheaderlinelayer :
+                
+                fet = qgis.core.QgsFeature()
+                if self.parentvectorlayer.getFeatures().nextFeature(fet):
+                    self.incremementId = 1 - int(fet.id() )
+                else:
+                    self.incremementId = 0
+            
                 if DEBUG : print('loadLabeledPluginLayer - success - parent layer : ',self.parentvectorlayer.source(),'count : ',self.parentvectorlayer.featureCount())
                 #create Header Line layer
                 self.resetHeaderLineLayer()
@@ -474,14 +474,9 @@ class LabeledPluginLayer( qgis.core.QgsPluginLayer ):
                     return False
                 elif ret == 65536  :  # No button65536  use entire layer
                     pass
-                    #print('use entire layer')
                 elif ret == 16384 :
-                    print('use selection')
                     self.selectedObjectsIds = [fet.id() for fet in sourceLayer.selectedFeatures()]
                    
-                    
-            #nbSelectedObjects = sourceLayer.selectedFeatureCount()
-            
 
             if sourceLayer.selectedFeatureCount() > 500 :  #alert if  many objects selected
 
@@ -720,13 +715,16 @@ class LabeledPluginLayer( qgis.core.QgsPluginLayer ):
             
             self.parentvectorlayer.startEditing()
             self.resetHeaderLineLayer()
+            feattoadd = []
             for fet in self.parentvectorlayer.getFeatures():
                 if fet.id()>=0:
                     self.checkDefaultFieldValue(fet)
                     fettemp = qgis.core.QgsFeature(self.headerlinelayer.fields())
                     if isinstance(fet['LblX'], float) and isinstance(fet['LblY'], float) :
                         self.adjustFeature(fet, fettemp)
-                    self.pr.addFeatures([fettemp])
+                    feattoadd.append(fettemp)
+            if len(feattoadd)>0:
+                self.pr.addFeatures(feattoadd)
             if DEBUG : print('ids after ',[fett.id() for fett in self.headerlinelayer.getFeatures()], [fett.id() for fett in self.parentvectorlayer.getFeatures()])
             """
             #self.styledlg = QDialog()
@@ -804,7 +802,7 @@ class LabeledPluginLayer( qgis.core.QgsPluginLayer ):
                         #don t do line if label interesects polygon
                         if qgis.core.QgsGeometry(qgis.core.QgsGeometry.fromPoint(pointlabel)).intersects(parentfet.geometry()):
                             pointlabel = pointfeature[0]
-                        
+                
                 elif int(qgis.PyQt.QtCore.QT_VERSION_STR[0]) == 5 :    #qgis3
                     polygon = parentfet.geometry().asPolygon()
                     if len(polygon)==0:     #mutlipart geom 
@@ -817,7 +815,7 @@ class LabeledPluginLayer( qgis.core.QgsPluginLayer ):
                         #don t do line if label interesects polygon
                         if qgis.core.QgsGeometry(qgis.core.QgsGeometry.fromPoint(pointlabel)).intersects(parentfet.geometry()):
                             pointlabel = pointfeature[0]
-                    
+                
                 
                 for pointfet in pointfeature:
                     templine = qgis.core.QgsGeometry.fromPolyline([pointlabel,pointfet])
@@ -893,9 +891,11 @@ class LabeledPluginLayer( qgis.core.QgsPluginLayer ):
             self.parentvectorlayer.changeAttributeValue(parentfet.id(),self.parentvectorlayer.fields().indexFromName("LblScale"), scale)
             
         #then compute headerline
+        #self.pixelDistBufferTargetPoint
                 
         distnoheaderinmeters = scale * self.pixelDistWithNoHeaderLine/100.0
         distsimpleheaderinmeters = scale * self.pixelDistWithSimpleHeaderLine/100.0
+        disttargetpoinbuffer = scale * self.pixelDistBufferTargetPoint/100.0
         #distnoheaderinmeters = self.iface.mapCanvas().mapUnitsPerPixel() * self.pixelDistWithNoHeaderLine
         #distsimpleheaderinmeters = self.iface.mapCanvas().mapUnitsPerPixel() * self.pixelDistWithSimpleHeaderLine
         
@@ -905,7 +905,12 @@ class LabeledPluginLayer( qgis.core.QgsPluginLayer ):
             if distfeat < distnoheaderinmeters:
                 pass
             elif  distfeat < distsimpleheaderinmeters :
-                multipoly.append([pointlabel,pointfeature])
+                #multipoly.append([pointlabel,pointfeature])
+                geomtemp = qgis.core.QgsGeometry.fromPolyline([pointlabel,pointfeature])
+                if parentfet.geometry().type() in [0,1]:
+                    geomtemp = geomtemp.difference( qgis.core.QgsGeometry.fromPoint(pointfeature).buffer( disttargetpoinbuffer ,12 )) 
+                #print(geomtemp2.asPolyline())
+                multipoly.append(geomtemp.asPolyline())
                 #return qgis.core.QgsGeometry.fromPolyline([pointlabel,pointfeature])
             else:
                 headermiddlepoint = qgis.core.QgsGeometry(qgis.core.QgsGeometry.fromPoint(pointlabel))
@@ -914,8 +919,15 @@ class LabeledPluginLayer( qgis.core.QgsPluginLayer ):
                 else:
                     headermiddlepoint.translate(-distnoheaderinmeters,0)
                 headermiddlepoint = headermiddlepoint.asPoint()
+                 
+                
                 #return qgis.core.QgsGeometry.fromPolyline([pointlabel,headermiddlepoint,pointfeature])
-                multipoly.append([pointlabel,headermiddlepoint,pointfeature])
+                geomtemp = qgis.core.QgsGeometry.fromPolyline([pointlabel,headermiddlepoint,pointfeature])
+                if parentfet.geometry().type() in [0,1]:
+                    geomtemp = geomtemp.difference( qgis.core.QgsGeometry.fromPoint(pointfeature).buffer( disttargetpoinbuffer ,12 )) 
+                #print(geomtemp2.asPolyline())
+                multipoly.append(geomtemp.asPolyline())
+                
         if len(multipoly) == 0:
             return qgis.core.QgsGeometry()
         elif len(multipoly) == 1 :
